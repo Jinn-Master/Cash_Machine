@@ -1,4 +1,4 @@
-# 💸 Money Printer
+# 💸 Cash_Machine
 
 A multi-bot arbitrage and yield system for Base blockchain. Squeezes profit from
 flash-loan arbitrage, new token scalping, dust collection, oracle lag, solver
@@ -58,6 +58,7 @@ money-printer/
 
 ### Required Accounts / Services
 - [x] SendGrid account (free tier works) — for email reports
+- [x] Alchemy API key
 - [x] Telegram bot (@BotFather) — for alerts
 - [x] Anthropic API key — for AI oversight
 - [x] 4 Ethereum wallets — bot, spending, overhead, staking
