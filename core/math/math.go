@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/yourname/money-printer/core/config"
+	"github.com/Jinn-Master/Cash_Machine/core/config"
 )
 
 // DexQuotes holds one output quote per DEX. Index = DEX ID constant from config.

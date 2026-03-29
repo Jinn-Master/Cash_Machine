@@ -279,3 +279,125 @@ const BackedAPIURL = "https://backed.fi/api/tokens"
 
 // Ondo Finance API
 const OndoAPIURL = "https://api.ondo.finance/v1/funds"
+
+// ── Arbitrum One — Chain ID 42161 ─────────────────────────────────────────────
+
+const ArbitrumChainID = 42161
+
+// DEX IDs for Arbitrum (same numeric slots, different protocols)
+// 0 = Uniswap V3   (IV3Router)
+// 1 = Camelot V2   (IV2Router)
+// 2 = SushiSwap V2 (IV2Router)
+// 3 = GMX wrapper  (IV2Router)
+// 4 = Curve wrapper (IV2Router)
+// 5 = Maverick V2  (IMaverickV2Router)
+
+var ArbDexNames = [DexCount]string{
+	"UniV3",
+	"Camelot",
+	"SushiSwap",
+	"GMX",
+	"Curve",
+	"MaverickV2",
+}
+
+var (
+	// Aave V3 on Arbitrum
+	ArbAavePool = common.HexToAddress("0x794a61358D6845594F94dc1DB02A252b5b4814aD")
+
+	// Uniswap V3 on Arbitrum
+	ArbUniV3Router  = common.HexToAddress("0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45")
+	ArbUniV3Factory = common.HexToAddress("0x1F98431c8aD98523631AE4a59f267346ea31F984")
+	ArbUniV3Quoter  = common.HexToAddress("0x61fFE014bA17989E743c5F6cB21bF9697530B21e")
+
+	// Camelot V2 on Arbitrum (V2-compatible)
+	ArbCamelotRouter  = common.HexToAddress("0xc873fEcbd354f5A56E00E710B90EF4201db2448d")
+	ArbCamelotFactory = common.HexToAddress("0x6EcCab422D763aC031210895C81787E87B43A652")
+
+	// SushiSwap V2 on Arbitrum (V2-compatible)
+	ArbSushiRouter  = common.HexToAddress("0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506")
+	ArbSushiFactory = common.HexToAddress("0xc35DADB65012eC5796536bD9864eD8773aBc74C4")
+
+	// Maverick V2 on Arbitrum
+	ArbMaverickV2Factory = common.HexToAddress("0x0A11A9D84945b4868bcE5b17d84849059C01a35B")
+	ArbMaverickV2Router  = common.HexToAddress("0x5eDEd0d7E76C563FF081Ca01D9d12D6B404e2E9f")
+	ArbMaverickV2Quoter  = common.HexToAddress("0x6eBF4D8b42b27bbBF0a8cFc0781a0D63494FBB18")
+
+	// Chainlink price feeds on Arbitrum
+	ArbChainlinkETHUSD = common.HexToAddress("0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612")
+	ArbChainlinkBTCUSD = common.HexToAddress("0x6ce185539ad4fdaecd7dbd48f7a0241e85c6df3a")
+)
+
+// ── Arbitrum token addresses ───────────────────────────────────────────────────
+
+const (
+	ArbAddrUSDC  = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" // native USDC on Arbitrum
+	ArbAddrUSDCe = "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC6" // bridged USDC.e
+	ArbAddrWETH  = "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"
+	ArbAddrWBTC  = "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f"
+	ArbAddrARB   = "0x912CE59144191C1204E64559FE8253a0e49E6548"
+)
+
+// ── Arbitrum Tier 1 / Tier 2 pairs ────────────────────────────────────────────
+
+var ArbTier1Pairs = []TokenPair{
+	NewPair("USDC", ArbAddrUSDC, 6, "WETH", ArbAddrWETH, 18, 500),
+}
+
+var ArbTier2Pairs = []TokenPair{
+	NewPair("USDC", ArbAddrUSDC, 6, "ARB",  ArbAddrARB,  18, 3000),
+	NewPair("WETH", ArbAddrWETH, 18, "WBTC", ArbAddrWBTC, 8, 500),
+}
+
+// ── Multi-chain helper ────────────────────────────────────────────────────────
+
+// ChainConfig holds all addresses for a single chain deployment.
+type ChainConfig struct {
+	ChainID        int64
+	Name           string
+	AavePool       common.Address
+	UniV3Router    common.Address
+	UniV3Factory   common.Address
+	DexBRouter     common.Address // BaseSwap (Base) / Camelot (Arb)
+	DexCRouter     common.Address // SwapBased (Base) / SushiSwap (Arb)
+	MaverickRouter common.Address
+	// Aerodrome fields only set on Base
+	AeroRouter          common.Address
+	AeroVolatileFactory common.Address
+	AeroStableFactory   common.Address
+	// Tier pairs
+	Tier1 []TokenPair
+	Tier2 []TokenPair
+}
+
+var BaseConfig = ChainConfig{
+	ChainID:             BaseChainID,
+	Name:                "Base",
+	AavePool:            AavePool,
+	UniV3Router:         UniV3Router,
+	UniV3Factory:        UniV3Factory,
+	DexBRouter:          BaseswapRouter,
+	DexCRouter:          SwapBasedRouter,
+	MaverickRouter:      MaverickV2Router,
+	AeroRouter:          AeroRouter,
+	AeroVolatileFactory: AeroFactory,
+	AeroStableFactory:   AeroStableFactory,
+	Tier1:               Tier1Pairs,
+	Tier2:               Tier2Pairs,
+}
+
+var ArbitrumConfig = ChainConfig{
+	ChainID:        ArbitrumChainID,
+	Name:           "Arbitrum",
+	AavePool:       ArbAavePool,
+	UniV3Router:    ArbUniV3Router,
+	UniV3Factory:   ArbUniV3Factory,
+	DexBRouter:     ArbCamelotRouter,
+	DexCRouter:     ArbSushiRouter,
+	MaverickRouter: ArbMaverickV2Router,
+	Tier1:          ArbTier1Pairs,
+	Tier2:          ArbTier2Pairs,
+}
+
+// SupportedChains lists all chains the bot can operate on.
+var SupportedChains = []ChainConfig{BaseConfig, ArbitrumConfig}

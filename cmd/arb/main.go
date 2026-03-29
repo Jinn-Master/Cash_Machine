@@ -25,10 +25,10 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/joho/godotenv"
 
-	"github.com/yourname/money-printer/bots/arb"
-	"github.com/yourname/money-printer/core/config"
-	"github.com/yourname/money-printer/core/logger"
-	"github.com/yourname/money-printer/core/state"
+	"github.com/Jinn-Master/Cash_Machine/bots/arb"
+	"github.com/Jinn-Master/Cash_Machine/core/config"
+	"github.com/Jinn-Master/Cash_Machine/core/logger"
+	"github.com/Jinn-Master/Cash_Machine/core/state"
 )
 
 func main() {

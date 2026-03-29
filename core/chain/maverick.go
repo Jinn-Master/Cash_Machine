@@ -28,7 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/yourname/money-printer/core/config"
+	"github.com/Jinn-Master/Cash_Machine/core/config"
 )
 
 const maverickV2QuoterABIStr = `[

@@ -1,0 +1,22 @@
+{
+  "name": "cash-machine",
+  "version": "1.0.0",
+  "description": "Flash loan arbitrage bot — Base & Arbitrum",
+  "scripts": {
+    "compile":          "hardhat compile",
+    "test":             "hardhat test",
+    "deploy:base":      "hardhat run scripts/deploy_base.js --network base",
+    "deploy:baseSep":   "hardhat run scripts/deploy_base.js --network baseSepolia",
+    "deploy:arb":       "hardhat run scripts/deploy_arbitrum.js --network arbitrum",
+    "deploy:arbSep":    "hardhat run scripts/deploy_arbitrum.js --network arbitrumSepolia",
+    "verify:base":      "hardhat verify --network base",
+    "verify:arb":       "hardhat verify --network arbitrum"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "hardhat": "^2.22.0"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0"
+  }
+}

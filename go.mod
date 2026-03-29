@@ -1,4 +1,4 @@
-module github.com/yourname/money-printer
+module github.com/Jinn-Master/Cash_Machine
 
 go 1.21
 

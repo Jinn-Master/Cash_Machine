@@ -13,10 +13,10 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/yourname/money-printer/core/chain"
-	"github.com/yourname/money-printer/core/config"
-	"github.com/yourname/money-printer/core/logger"
-	arbmath "github.com/yourname/money-printer/core/math"
+	"github.com/Jinn-Master/Cash_Machine/core/chain"
+	"github.com/Jinn-Master/Cash_Machine/core/config"
+	"github.com/Jinn-Master/Cash_Machine/core/logger"
+	arbmath "github.com/Jinn-Master/Cash_Machine/core/math"
 )
 
 // ── PairState ─────────────────────────────────────────────────────────────────

@@ -33,10 +33,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourname/money-printer/core/config"
-	"github.com/yourname/money-printer/core/logger"
-	"github.com/yourname/money-printer/core/state"
-	"github.com/yourname/money-printer/core/treasury"
+	"github.com/Jinn-Master/Cash_Machine/core/config"
+	"github.com/Jinn-Master/Cash_Machine/core/logger"
+	"github.com/Jinn-Master/Cash_Machine/core/state"
+	"github.com/Jinn-Master/Cash_Machine/core/treasury"
 )
 
 // ── Monitor config ────────────────────────────────────────────────────────────
