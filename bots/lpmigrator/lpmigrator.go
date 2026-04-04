@@ -197,50 +197,56 @@ func (bot *LPMigratorBot) Run(ctx context.Context) {
 	go bot.expirePendingBurns(ctx)
 }
 
-// watchFactory subscribes to Burn+Mint events from all pairs created by a factory.
-// We use a "any address" filter — this catches ALL pairs, not just tracked ones.
+// watchFactory polls for Burn+Mint events block-by-block.
+// Uses FilterLogs (eth_getLogs) instead of subscriptions — compatible with Alchemy.
 func (bot *LPMigratorBot) watchFactory(ctx context.Context, fDef config.FactoryConfig) {
 	log := logger.Log
+	log.Info("📡 LP-Migrator: starting poll watcher", "dex", fDef.Name)
 
-	// Filter: Burn OR Mint topic, from ANY address
-	// This is intentionally broad — we want to see ALL pairs on this DEX
-	query := ethereum.FilterQuery{
-		Topics: [][]common.Hash{
-			{bot.burnTopic, bot.mintTopic},
-		},
+	// Start from current block
+	var fromBlock uint64
+	if header, err := bot.client.HeaderByNumber(ctx, nil); err == nil {
+		fromBlock = header.Number.Uint64()
 	}
+
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		default:
-		}
+		case <-ticker.C:
+			header, err := bot.client.HeaderByNumber(ctx, nil)
+			if err != nil {
+				continue
+			}
+			toBlock := header.Number.Uint64()
+			if toBlock < fromBlock {
+				continue
+			}
+			if toBlock-fromBlock > 20 {
+				toBlock = fromBlock + 20
+			}
 
-		log.Info("📡 LP-Migrator: subscribing to factory events", "dex", fDef.Name)
-		logsCh := make(chan types.Log, 256)
-		sub, err := bot.client.SubscribeFilterLogs(ctx, query, logsCh)
-		if err != nil {
-			log.Warn("LP-Migrator subscribe failed", "dex", fDef.Name, "err", err)
-			time.Sleep(time.Duration(config.ReconnectDelaySec) * time.Second)
-			continue
-		}
-		log.Info("✅ LP-Migrator listening", "dex", fDef.Name)
+			query := ethereum.FilterQuery{
+				FromBlock: new(big.Int).SetUint64(fromBlock),
+				ToBlock:   new(big.Int).SetUint64(toBlock),
+				Topics:    [][]common.Hash{{bot.burnTopic, bot.mintTopic}},
+			}
 
-	drain:
-		for {
-			select {
-			case <-ctx.Done():
-				sub.Unsubscribe()
-				return
-			case err := <-sub.Err():
-				log.Warn("LP-Migrator sub dropped", "dex", fDef.Name, "err", err)
-				break drain
-			case rawLog := <-logsCh:
+			logs, err := bot.client.FilterLogs(ctx, query)
+			if err != nil {
+				log.Warn("LP-Migrator poll failed", "dex", fDef.Name, "err", err)
+				continue
+			}
+
+			for _, rawLog := range logs {
 				go bot.processLog(ctx, rawLog, fDef.Name)
 			}
+
+			fromBlock = toBlock + 1
 		}
-		time.Sleep(time.Duration(config.ReconnectDelaySec) * time.Second)
 	}
 }
 

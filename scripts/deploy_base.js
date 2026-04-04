@@ -14,7 +14,7 @@ const ADDRESSES = {
   dexBRouter:          "0x327Df1E6de05895d2ab08513aaDD9313Fe505d86", // BaseSwap
   dexCRouter:          "0xaaa3b1F1bd7BCc97fD1917c18ADE665C5D31F066", // SwapBased
   dexDRouter:          ethers.ZeroAddress, // not used on Base
-  maverickRouter:      "0x5eDEd0d7E76C563FF081Ca01D9d12D6B404e2E9f",
+  maverickRouter:      "0x5edeD0D7E76C563FF081ca01d9d12d6b404e2e9f",
   minProfit:           ethers.parseUnits("1", 6), // 1 USDC minimum profit
 };
 

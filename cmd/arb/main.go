@@ -151,7 +151,7 @@ func main() {
 			case <-ctx.Done():
 				return
 			case ps := <-hotPairs:
-				ps := ps
+
 				log.Info("⚡ hot-loading new pair", "pair", ps.Key())
 				go arb.PollSinglePair(ctx, exec, ps, config.HotPairPollInterval)
 			}

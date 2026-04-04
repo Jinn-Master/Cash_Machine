@@ -199,7 +199,7 @@ func (fw *FactoryWatcher) decodeLog(rawLog types.Log, fDef FactoryDef) (*NewPair
 		ev.Fee = uint32(feeBytes[29])<<16 | uint32(feeBytes[30])<<8 | uint32(feeBytes[31])
 
 		type v3Data struct {
-			TickSpacing int32
+			TickSpacing *big.Int
 			Pool        common.Address
 		}
 		var d v3Data
