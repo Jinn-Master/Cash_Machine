@@ -41,19 +41,31 @@ interface IMaverickV2Router {
     function exactInputSingle(address tokenIn, address tokenOut, address pool, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, bytes calldata data) external returns (uint256);
 }
 
-interface IMorpho {
-    function flashLoan(address token, uint256 assets, bytes calldata data) external;
+// Balancer V2 Vault — flash loans are free on Base
+interface IBalancerVault {
+    function flashLoan(
+        address recipient,
+        address[] calldata tokens,
+        uint256[] calldata amounts,
+        bytes calldata userData
+    ) external;
 }
 
-interface IMorphoFlashLoanCallback {
-    function onMorphoFlashLoan(uint256 assets, bytes calldata data) external;
+// Balancer flash loan callback
+interface IFlashLoanRecipient {
+    function receiveFlashLoan(
+        address[] calldata tokens,
+        uint256[] calldata amounts,
+        uint256[] calldata feeAmounts,
+        bytes calldata userData
+    ) external;
 }
 
-contract ArbitrageExecutor is IMorphoFlashLoanCallback {
+contract ArbitrageExecutor is IFlashLoanRecipient {
     using SafeERC20 for IERC20;
 
     address public owner;
-    IMorpho           public morpho;
+    IBalancerVault    public balancer;
     IV3Router         public uniV3Router;
     IAerodromeRouter  public aeroRouter;
     IV2Router         public dexBRouter;
@@ -84,17 +96,17 @@ contract ArbitrageExecutor is IMorphoFlashLoanCallback {
     modifier nonReentrant() { require(!_locked, "Reentrant"); _locked = true; _; _locked = false; }
 
     constructor(
-        address _morpho, address _uniV3Router, address _aeroRouter,
+        address _balancer, address _uniV3Router, address _aeroRouter,
         address _aeroVolatileFactory, address _aeroStableFactory,
         address _dexBRouter, address _dexCRouter, address _dexDRouter,
         address _maverickRouter, uint256 _minProfit
     ) {
-        require(_morpho      != address(0), "bad morpho");
+        require(_balancer    != address(0), "bad balancer");
         require(_uniV3Router != address(0), "bad uni");
         require(_dexBRouter  != address(0), "bad dexB");
         require(_dexCRouter  != address(0), "bad dexC");
         owner               = msg.sender;
-        morpho              = IMorpho(_morpho);
+        balancer            = IBalancerVault(_balancer);
         uniV3Router         = IV3Router(_uniV3Router);
         aeroRouter          = IAerodromeRouter(_aeroRouter);
         aeroVolatileFactory = _aeroVolatileFactory;
@@ -120,11 +132,23 @@ contract ArbitrageExecutor is IMorphoFlashLoanCallback {
         _cbBuyDex = buyDex; _cbSellDex = sellDex;
         _cbMinAB = minAB; _cbMinBA = minBA; _cbDeadline = deadline;
         _cbMaverickPool = maverickPool;
-        morpho.flashLoan(tokenA, loanAmount, "");
+
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = tokenA;
+        amounts[0] = loanAmount;
+        balancer.flashLoan(address(this), tokens, amounts, "");
     }
 
-    function onMorphoFlashLoan(uint256 assets, bytes calldata) external override {
-        require(msg.sender == address(morpho), "not morpho");
+    // Balancer callback — feeAmounts is 0 on Base (Balancer removed fees)
+    function receiveFlashLoan(
+        address[] calldata tokens,
+        uint256[] calldata amounts,
+        uint256[] calldata feeAmounts,
+        bytes calldata
+    ) external override {
+        require(msg.sender == address(balancer), "not balancer");
+
         address tokenA = _cbTokenA; address tokenB = _cbTokenB;
         uint24 poolFee = _cbPoolFee; uint8 buyDex = _cbBuyDex; uint8 sellDex = _cbSellDex;
         uint256 minAB = _cbMinAB; uint256 minBA = _cbMinBA; uint256 deadline = _cbDeadline;
@@ -133,15 +157,21 @@ contract ArbitrageExecutor is IMorphoFlashLoanCallback {
         _cbBuyDex = 0; _cbSellDex = 0; _cbMinAB = 0; _cbMinBA = 0;
         _cbDeadline = 0; _cbMaverickPool = address(0);
 
-        _swapAtoB(tokenA, tokenB, assets, poolFee, buyDex, minAB, deadline, maverickPool);
+        uint256 loanAmount = amounts[0];
+        uint256 fee = feeAmounts[0];
+        uint256 repay = loanAmount + fee;
+
+        _swapAtoB(tokenA, tokenB, loanAmount, poolFee, buyDex, minAB, deadline, maverickPool);
         uint256 midBal = IERC20(tokenB).balanceOf(address(this));
         require(midBal > 0, "no tokenB");
         _swapBtoA(tokenB, tokenA, midBal, poolFee, sellDex, minBA, deadline, maverickPool);
 
         uint256 endBalance = IERC20(tokenA).balanceOf(address(this));
-        require(endBalance >= assets + minProfit, "profit < min");
-        IERC20(tokenA).safeApprove(address(morpho), assets);
-        emit ArbExecuted(tokenA, tokenB, buyDex, sellDex, assets, endBalance - assets);
+        require(endBalance >= repay + minProfit, "profit < min");
+
+        // Repay Balancer — simple transfer back
+        IERC20(tokenA).safeTransfer(address(balancer), repay);
+        emit ArbExecuted(tokenA, tokenB, buyDex, sellDex, loanAmount, endBalance - repay);
     }
 
     function _swapAtoB(address tokenA, address tokenB, uint256 amountIn, uint24 poolFee, uint8 dexId, uint256 minOut, uint256 deadline, address maverickPool) internal {
