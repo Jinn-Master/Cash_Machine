@@ -24,8 +24,7 @@ AI-assisted oversight and automated financial reporting.
 > not operate this system for profit and assumes no liability for any use of this code.
 > 
 > For questions, consulting inquiries, or custom bot development: 
-> [Add your preferred contact method here — email, LinkedIn, or Telegram]
-
+> jinn-master@proton.me
 ## System Overview
 
 ```
