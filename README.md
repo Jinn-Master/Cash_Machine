@@ -7,6 +7,25 @@ AI-assisted oversight and automated financial reporting.
 
 ---
 
+> ## ⚠️ Important Disclaimer
+> 
+> **This repository is a portfolio and research project — not a production-ready trading system.**
+> 
+> Cash_Machine was built as an architectural exploration of multi-bot MEV systems 
+> on Base blockchain. It is shared publicly as a demonstration of skills in:
+> - On-chain event detection and MEV strategy design
+> - Multi-bot coordination and shared state architecture
+> - Go/Solidity development and DEX integration
+> - Automated system design and AI-assisted oversight
+> 
+> **Do not deploy this system with real capital.** The strategies described require 
+> institutional-grade infrastructure (colocation, private order flow, dedicated 
+> nodes) that a solo operator cannot replicate cost-effectively. The author does 
+> not operate this system for profit and assumes no liability for any use of this code.
+> 
+> For questions, consulting inquiries, or custom bot development: 
+> [Add your preferred contact method here — email, LinkedIn, or Telegram]
+
 ## System Overview
 
 ```
