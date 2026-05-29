@@ -321,7 +321,7 @@ func (s *Scalper) executeScalp(ctx context.Context, ev state.NewTokenEvent, hpRe
 	minOut := new(big.Int).Mul(quoteOut, big.NewInt(9950))
 	minOut.Div(minOut, big.NewInt(10000)) // 99.5% of quote = 0.5% slippage
 
-	deadline := new(big.Int).Set(uint64(time.Now().Add(60 * time.Second).Unix()))
+	deadline := new(big.Int).SetUint64(uint64(time.Now().Add(60 * time.Second).Unix()))
 
 	// Approve then swap
 	approveHash, err := chain.AerodromeApprove(ctx, s.client, s.privKey, baseAddr, amountIn)

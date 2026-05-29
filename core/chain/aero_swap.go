@@ -73,7 +73,7 @@ func AerodromeSwap(
 	log := logger.Log
 	from := crypto.PubkeyToAddress(privKey.PublicKey)
 
-	factory := config.AeroVolatileFactory
+	factory := config.AeroFactory
 	if stable {
 		factory = config.AeroStableFactory
 	}

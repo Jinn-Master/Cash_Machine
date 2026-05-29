@@ -43,6 +43,7 @@ import (
 	"github.com/Jinn-Master/Cash_Machine/bots/solver"
 	"github.com/Jinn-Master/Cash_Machine/bots/staking"
 	"github.com/Jinn-Master/Cash_Machine/core/config"
+	"github.com/Jinn-Master/Cash_Machine/core/chain"
 	"github.com/Jinn-Master/Cash_Machine/core/health"
 	"github.com/Jinn-Master/Cash_Machine/core/logger"
 	"github.com/Jinn-Master/Cash_Machine/core/state"
@@ -250,7 +251,7 @@ func main() {
 	// ── Treasury ──────────────────────────────────────────────────────────────
 	spendingWallet := common.HexToAddress(os.Getenv("SPENDING_WALLET"))
 	overheadWallet := common.HexToAddress(os.Getenv("OVERHEAD_WALLET"))
-	stakingWallet  := common.HexToAddress(os.Getenv("STAKING_WALLET"))
+	stakingWallet  = common.HexToAddress(os.Getenv("STAKING_WALLET"))
 	treas := treasury.New(
 		client, privKey, botWallet,
 		spendingWallet,

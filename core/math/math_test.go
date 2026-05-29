@@ -132,10 +132,10 @@ func TestGrossSpreadPct(t *testing.T) {
 }
 
 func TestNetProfitable(t *testing.T) {
-	// 200 USDC spread, 100 USDC gas+fee costs → profitable
+	// Large spread: 200 USDC profit on 200 USDC trade, gas cost negligible
 	tradeSize := big.NewInt(200_000_000)    // 200 USDC
-	buyOut := big.NewInt(1_200_000_000)     // 1200 tokenB output
-	sellOut := big.NewInt(1_000_000_000)    // 1000 tokenA back → 200 profit
+	buyOut := big.NewInt(1_200_000_000)     // 1200 tokenB output (buy cheap)
+	sellOut := big.NewInt(1_000_000_000)    // 1000 tokenA back (sell at higher price)
 	baseFee := big.NewInt(1e9)             // 1 gwei
 	priorityFee := big.NewInt(1e8)         // 0.1 gwei
 
@@ -143,29 +143,37 @@ func TestNetProfitable(t *testing.T) {
 	if !ok {
 		t.Errorf("expected profitable, got: %s", reason)
 	}
+}
 
-	// Unprofitable: spread too small
-	buyOutSmall := big.NewInt(1_001_000_000)
-	sellOutSmall := big.NewInt(1_000_000_000)
-	ok, reason = NetProfitable(tradeSize, buyOutSmall, sellOutSmall, 300000, baseFee, priorityFee, 0)
+func TestNetProfitable_Unprofitable(t *testing.T) {
+	// Tiny spread with high gas: should be unprofitable
+	tradeSize := big.NewInt(200_000_000)
+	buyOut := big.NewInt(1_001_000_000)     // 1001 tokenB
+	sellOut := big.NewInt(1_000_000_000)    // 1000 tokenA back → 1 USDC spread
+	// High gas: 500k gas * (50+10)gwei = 30M gwei = 0.03 ETH ≈ $60 at $2000/ETH
+	baseFee := big.NewInt(50e9)             // 50 gwei
+	priorityFee := big.NewInt(10e9)         // 10 gwei
+
+	ok, _ := NetProfitable(tradeSize, buyOut, sellOut, 500000, baseFee, priorityFee, 1.0) // 1.0 ethPerTokenA for WETH
 	if ok {
-		t.Errorf("expected unprofitable, got ok: %s", reason)
+		t.Errorf("expected unprofitable for tiny spread with high gas, got ok")
 	}
 }
 
 func TestBestArb(t *testing.T) {
-	// DEX 0: 100, DEX 1: 110, DEX 2: 95 → buy on 2 (cheapest), sell on 1 (most expensive)
+	// DEX 0: 100, DEX 1: 110, DEX 2: 95
+	// Best arb: buy on DEX 1 (highest output = cheapest tokenB), sell on DEX 2 (lowest output = most expensive tokenB)
 	var quotes DexQuotes
 	quotes[0] = big.NewInt(100)
 	quotes[1] = big.NewInt(110)
 	quotes[2] = big.NewInt(95)
 
 	buyDex, sellDex, spread := BestArb(quotes)
-	if buyDex != 2 {
-		t.Errorf("expected buyDex=2 (cheapest), got %d", buyDex)
+	if buyDex != 1 {
+		t.Errorf("expected buyDex=1 (DEX with highest output = cheapest), got %d", buyDex)
 	}
-	if sellDex != 1 {
-		t.Errorf("expected sellDex=1 (most expensive), got %d", sellDex)
+	if sellDex != 2 {
+		t.Errorf("expected sellDex=2 (DEX with lowest output = most expensive), got %d", sellDex)
 	}
 	// Spread = (110 - 95) / 95 * 100 = 15.79%
 	if spread < 15.0 || spread > 16.0 {
