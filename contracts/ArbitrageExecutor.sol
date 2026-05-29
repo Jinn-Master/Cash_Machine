@@ -7,6 +7,7 @@ library SafeERC20 {
         require(ok && (data.length == 0 || abi.decode(data, (bool))), "ST failed");
     }
     function safeApprove(IERC20 token, address spender, uint256 amount) internal {
+        // Reset approval to 0 first (required by USDC and some other tokens)
         (bool s1,) = address(token).call(abi.encodeWithSelector(token.approve.selector, spender, 0));
         require(s1, "SA reset");
         (bool s2, bytes memory data) = address(token).call(abi.encodeWithSelector(token.approve.selector, spender, amount));
@@ -77,6 +78,7 @@ contract ArbitrageExecutor is IFlashLoanRecipient {
     uint256 public minProfit;
     bool private _locked;
 
+    // Callback state — stored in transient-like pattern (cleared after use)
     address private _cbTokenA;
     address private _cbTokenB;
     uint24  private _cbPoolFee;
@@ -96,15 +98,23 @@ contract ArbitrageExecutor is IFlashLoanRecipient {
     modifier nonReentrant() { require(!_locked, "Reentrant"); _locked = true; _; _locked = false; }
 
     constructor(
-        address _balancer, address _uniV3Router, address _aeroRouter,
-        address _aeroVolatileFactory, address _aeroStableFactory,
-        address _dexBRouter, address _dexCRouter, address _dexDRouter,
-        address _maverickRouter, uint256 _minProfit
+        address _balancer,
+        address _uniV3Router,
+        address _aeroRouter,
+        address _aeroVolatileFactory,
+        address _aeroStableFactory,
+        address _dexBRouter,
+        address _dexCRouter,
+        address _dexDRouter,
+        address _maverickRouter,
+        uint256 _minProfit
     ) {
         require(_balancer    != address(0), "bad balancer");
         require(_uniV3Router != address(0), "bad uni");
+        require(_aeroRouter  != address(0), "bad aero");
         require(_dexBRouter  != address(0), "bad dexB");
         require(_dexCRouter  != address(0), "bad dexC");
+        require(_dexDRouter  != address(0), "bad dexD");
         owner               = msg.sender;
         balancer            = IBalancerVault(_balancer);
         uniV3Router         = IV3Router(_uniV3Router);
@@ -119,9 +129,16 @@ contract ArbitrageExecutor is IFlashLoanRecipient {
     }
 
     function flashArbitrage(
-        address tokenA, address tokenB, uint256 loanAmount, uint24 poolFee,
-        uint8 buyDex, uint8 sellDex, uint256 minAB, uint256 minBA,
-        uint256 deadline, address maverickPool
+        address tokenA,
+        address tokenB,
+        uint256 loanAmount,
+        uint24 poolFee,
+        uint8 buyDex,
+        uint8 sellDex,
+        uint256 minAB,
+        uint256 minBA,
+        uint256 deadline,
+        address maverickPool
     ) external onlyOwner nonReentrant {
         require(buyDex < 6, "bad buyDex");
         require(sellDex < 6, "bad sellDex");
@@ -140,7 +157,8 @@ contract ArbitrageExecutor is IFlashLoanRecipient {
         balancer.flashLoan(address(this), tokens, amounts, "");
     }
 
-    // Balancer callback — feeAmounts is 0 on Base (Balancer removed fees)
+    // Balancer callback — feeAmounts should be 0 on Base (Balancer removed fees),
+    // but we validate to prevent deploy on chains where fees exist.
     function receiveFlashLoan(
         address[] calldata tokens,
         uint256[] calldata amounts,
@@ -148,17 +166,21 @@ contract ArbitrageExecutor is IFlashLoanRecipient {
         bytes calldata
     ) external override {
         require(msg.sender == address(balancer), "not balancer");
+        require(feeAmounts.length == 1, "bad fee len");
+        require(feeAmounts[0] == 0, "flash loan has fees — wrong chain or vault");
 
         address tokenA = _cbTokenA; address tokenB = _cbTokenB;
         uint24 poolFee = _cbPoolFee; uint8 buyDex = _cbBuyDex; uint8 sellDex = _cbSellDex;
         uint256 minAB = _cbMinAB; uint256 minBA = _cbMinBA; uint256 deadline = _cbDeadline;
         address maverickPool = _cbMaverickPool;
+
+        // Clear callback state to prevent replay
         _cbTokenA = address(0); _cbTokenB = address(0); _cbPoolFee = 0;
         _cbBuyDex = 0; _cbSellDex = 0; _cbMinAB = 0; _cbMinBA = 0;
         _cbDeadline = 0; _cbMaverickPool = address(0);
 
         uint256 loanAmount = amounts[0];
-        uint256 fee = feeAmounts[0];
+        uint256 fee = feeAmounts[0]; // validated as 0 above
         uint256 repay = loanAmount + fee;
 
         _swapAtoB(tokenA, tokenB, loanAmount, poolFee, buyDex, minAB, deadline, maverickPool);
@@ -169,12 +191,13 @@ contract ArbitrageExecutor is IFlashLoanRecipient {
         uint256 endBalance = IERC20(tokenA).balanceOf(address(this));
         require(endBalance >= repay + minProfit, "profit < min");
 
-        // Repay Balancer — simple transfer back
+        // Repay Balancer
         IERC20(tokenA).safeTransfer(address(balancer), repay);
         emit ArbExecuted(tokenA, tokenB, buyDex, sellDex, loanAmount, endBalance - repay);
     }
 
     function _swapAtoB(address tokenA, address tokenB, uint256 amountIn, uint24 poolFee, uint8 dexId, uint256 minOut, uint256 deadline, address maverickPool) internal {
+        require(block.timestamp <= deadline, "swap deadline expired");
         if (dexId == 0) {
             IERC20(tokenA).safeApprove(address(uniV3Router), amountIn);
             uniV3Router.exactInputSingle(IV3Router.ExactInputSingleParams({tokenIn: tokenA, tokenOut: tokenB, fee: poolFee, recipient: address(this), deadline: deadline, amountIn: amountIn, amountOutMinimum: minOut, sqrtPriceLimitX96: 0}));
@@ -199,6 +222,7 @@ contract ArbitrageExecutor is IFlashLoanRecipient {
             address[] memory path = new address[](2); path[0] = tokenA; path[1] = tokenB;
             dexCRouter.swapExactTokensForTokens(amountIn, minOut, path, address(this), deadline);
         } else {
+            require(dexId == 5, "bad dexId");
             require(address(maverickRouter) != address(0), "maverick not set");
             require(maverickPool != address(0), "maverick pool not set");
             IERC20(tokenA).safeApprove(address(maverickRouter), amountIn);
@@ -207,6 +231,7 @@ contract ArbitrageExecutor is IFlashLoanRecipient {
     }
 
     function _swapBtoA(address tokenB, address tokenA, uint256 amountIn, uint24 poolFee, uint8 dexId, uint256 minOut, uint256 deadline, address maverickPool) internal {
+        require(block.timestamp <= deadline, "swap deadline expired");
         if (dexId == 0) {
             IERC20(tokenB).safeApprove(address(uniV3Router), amountIn);
             uniV3Router.exactInputSingle(IV3Router.ExactInputSingleParams({tokenIn: tokenB, tokenOut: tokenA, fee: poolFee, recipient: address(this), deadline: deadline, amountIn: amountIn, amountOutMinimum: minOut, sqrtPriceLimitX96: 0}));
@@ -231,6 +256,7 @@ contract ArbitrageExecutor is IFlashLoanRecipient {
             address[] memory path = new address[](2); path[0] = tokenB; path[1] = tokenA;
             dexCRouter.swapExactTokensForTokens(amountIn, minOut, path, address(this), deadline);
         } else {
+            require(dexId == 5, "bad dexId");
             require(address(maverickRouter) != address(0), "maverick not set");
             require(maverickPool != address(0), "maverick pool not set");
             IERC20(tokenB).safeApprove(address(maverickRouter), amountIn);

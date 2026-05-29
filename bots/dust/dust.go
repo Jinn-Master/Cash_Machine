@@ -30,6 +30,7 @@ package dust
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"math/big"
 	"sync"
@@ -39,10 +40,12 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/Jinn-Master/Cash_Machine/core/chain"
 	"github.com/Jinn-Master/Cash_Machine/core/config"
 	"github.com/Jinn-Master/Cash_Machine/core/logger"
 	"github.com/Jinn-Master/Cash_Machine/core/state"
 )
+
 
 // ── TokenBalance represents a scanned balance ─────────────────────────────────
 
@@ -59,17 +62,19 @@ type TokenBalance struct {
 type DustCollector struct {
 	client     *ethclient.Client
 	wallet     common.Address
+	privKey    *ecdsa.PrivateKey
 
-	mu         sync.Mutex
+	mu          sync.Mutex
 	knownTokens map[common.Address]struct{ Symbol string; Decimals int }
-	lastRun    time.Time
+	lastRun     time.Time
 	totalCollectedUSD float64
 }
 
-func New(client *ethclient.Client, wallet common.Address) *DustCollector {
+func New(client *ethclient.Client, wallet common.Address, privKey *ecdsa.PrivateKey) *DustCollector {
 	return &DustCollector{
 		client:      client,
 		wallet:      wallet,
+		privKey:     privKey,
 		knownTokens: make(map[common.Address]struct{ Symbol string; Decimals int }),
 	}
 }
@@ -189,14 +194,35 @@ func (d *DustCollector) sweep(ctx context.Context) {
 		"gas_gwei", gasPrice,
 	)
 
-	var totalSwept float64
+		var totalSwept float64
 	for _, tb := range dustFound {
 		log.Info("  💱 converting dust",
 			"token", tb.Symbol,
 			"balance_usd", fmt.Sprintf("$%.4f", tb.USD),
 		)
-		// TODO: execute swap via Aerodrome router (token → USDC)
-		// chain.SwapExactTokensForTokens(ctx, client, privKey, tb.Addr, usdcAddr, tb.Balance, ...)
+
+		// 1. Approve Aerodrome router to spend this token
+		maxApprove := new(big.Int).Set(tb.Balance)
+		approveHash, err := chain.AerodromeApprove(ctx, d.client, nil, tb.Addr, maxApprove)
+		if err != nil {
+			log.Warn("dust: approve failed, skipping", "token", tb.Symbol, "err", err)
+			continue
+		}
+		_ = approveHash
+
+		// 2. Swap token → USDC via Aerodrome volatile pool
+		usdcAddr := common.HexToAddress(config.AddrUSDC)
+		minOut := big.NewInt(1) // accept any amount (dust is tiny)
+		deadline := new(big.Int).SetUint64(uint64(time.Now().Add(60 * time.Second).Unix()))
+
+		swapHash, err := chain.AerodromeSwap(ctx, d.client, nil,
+			tb.Addr, usdcAddr, tb.Balance, minOut, false, deadline)
+		if err != nil {
+			log.Warn("dust: swap failed", "token", tb.Symbol, "err", err)
+			continue
+		}
+		_ = swapHash
+
 		totalSwept += tb.USD
 	}
 

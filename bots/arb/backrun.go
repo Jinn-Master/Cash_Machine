@@ -317,15 +317,61 @@ func (e *Executor) EvaluatePairBackrun(ctx context.Context, p *PairState) {
 	e.ExecuteTradeBackrun(ctx, p, uint8(buyDex), uint8(sellDex), quotes[buyDex], quotes[sellDex])
 }
 
-// ExecuteTradeBackrun executes with boosted priority fee for backrun positioning
-func (e *Executor) ExecuteTradeBackrun(ctx context.Context, p *PairState, buyDex, sellDex uint8, buyOut, sellOut *big.Int) {
+// ExecuteTradeBackrun executes with boosted priority fee for backrun positioning.
+// Uses proper slippage protection on BOTH legs (not just the first).
+func (e *Executor) ExecuteTradeBackrun(ctx context.Context, p *PairState, buyDex, sellDex uint8, _, _ *big.Int) {
 	log := logger.Log
 
 	e.tradeLock.Lock()
 	defer e.tradeLock.Unlock()
 
-	minAB := big.NewInt(1)
-	// minBA := big.NewInt(1) // safety off for backrun testing
+	// Re-fetch live quotes for accurate minOut calculations.
+	// The quotes from the event handler may be stale by the time we execute.
+	var (
+		quotes arbmath.DexQuotes
+		mu     sync.Mutex
+		wg     sync.WaitGroup
+	)
+
+	fetch := func(dexId uint8, fn func() (*big.Int, error)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out, err := fn()
+			if err != nil {
+				return
+			}
+			if out != nil && out.Sign() > 0 {
+				mu.Lock()
+				quotes[dexId] = out
+				mu.Unlock()
+			}
+		}()
+	}
+
+	fetch(buyDex, func() (*big.Int, error) {
+		return chain.UniV3Quote(ctx, e.Client, config.UniV3Quoter,
+			p.AddrA, p.AddrB, p.UniV3Fee, p.TradeSize)
+	})
+	fetch(sellDex, func() (*big.Int, error) {
+		// For the sell leg, estimate how much tokenB we'll have after the buy leg
+		return chain.UniV3Quote(ctx, e.Client, config.UniV3Quoter,
+			p.AddrB, p.AddrA, p.UniV3Fee, p.TradeSize)
+	})
+
+	wg.Wait()
+
+	buyOut := quotes[buyDex]
+	sellOut := quotes[sellDex]
+	if buyOut == nil || sellOut == nil || buyOut.Sign() == 0 || sellOut.Sign() == 0 {
+		log.Warn("backrun: stale quotes on re-fetch, aborting", "pair", p.Key())
+		return
+	}
+
+	// Both legs have proper slippage protection
+	minAB := arbmath.ApplySlippage(buyOut)
+	repay := new(big.Int).Add(p.TradeSize, arbmath.FlashLoanFee(p.TradeSize))
+	minBA := arbmath.ApplySlippage(repay)
 
 	header, err := e.Client.HeaderByNumber(ctx, nil)
 	if err != nil {
@@ -341,13 +387,21 @@ func (e *Executor) ExecuteTradeBackrun(ctx context.Context, p *PairState, buyDex
 	// 2x priority fee to land right after the swap we're backrunning
 	priorityFee := new(big.Int).Mul(big.NewInt(config.PriorityFeeGwei*2), big.NewInt(1e9))
 
+	// Verify profitability with fresh quotes
+	ok, reason := arbmath.NetProfitable(p.TradeSize, buyOut, sellOut,
+		600000, baseFee, priorityFee, 1.0)
+	if !ok {
+		log.Info("backrun: not profitable on re-check", "pair", p.Key(), "reason", reason)
+		return
+	}
+
 	// Simulate first
 	err = chain.SimulateFlashArbitrage(ctx, e.Client,
 		e.WalletAddr, e.ContractAddr,
 		p.AddrA, p.AddrB,
 		p.TradeSize, p.UniV3Fee,
 		buyDex, sellDex,
-		minAB, big.NewInt(1), deadline,
+		minAB, minBA, deadline,
 	)
 	if err != nil {
 		log.Info("backrun simulation failed", "pair", p.Key(), "err", err)
@@ -365,7 +419,7 @@ func (e *Executor) ExecuteTradeBackrun(ctx context.Context, p *PairState, buyDex
 		BuyDex:      buyDex,
 		SellDex:     sellDex,
 		MinAB:       minAB,
-		MinBA:       big.NewInt(1),
+		MinBA:       minBA,
 		Deadline:    deadline,
 		PrivKey:     e.PrivKey,
 		BaseFee:     baseFee,

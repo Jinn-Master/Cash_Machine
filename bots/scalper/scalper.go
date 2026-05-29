@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/Jinn-Master/Cash_Machine/core/chain"
 	"github.com/Jinn-Master/Cash_Machine/core/config"
 	"github.com/Jinn-Master/Cash_Machine/core/logger"
 	"github.com/Jinn-Master/Cash_Machine/core/state"
@@ -26,6 +27,7 @@ type Position struct {
 	TokenAddr   common.Address
 	TokenSym    string
 	BaseToken   string
+	BaseAddr    common.Address
 	EntryUSD    float64
 	TokenAmount *big.Int
 	BoughtAt    time.Time
@@ -287,7 +289,93 @@ func (s *Scalper) evaluateNewToken(ctx context.Context, ev state.NewTokenEvent) 
 		"token",     ev.TokenSym,
 		"dex_count", ev.DexCount,
 	)
-	// TODO Phase 2: s.executeScalp(ctx, ev, hpResult)
+
+	// Execute the scalp: buy token on Aerodrome
+	s.executeScalp(ctx, ev, hpResult)
+}
+
+func (s *Scalper) executeScalp(ctx context.Context, ev state.NewTokenEvent, hpResult HoneypotResult) {
+	log := logger.Log
+	tokenAddr := ev.TokenAddr
+	baseAddr := ev.BaseAddr
+	baseSym := ev.BaseToken
+
+	// Position sizing: max $100 USDC per scalp
+	positionUSD := config.ScalperMaxPositionUSDC
+	amountIn := new(big.Int).SetUint64(uint64(positionUSD * 1_000_000)) // USDC 6 decimals
+
+	// Determine if pool is stable (e.g., for stablecoin pairs)
+	isStable := baseSym == "USDC"
+
+	// Calculate minimum output with slippage tolerance
+	// Get a quote first to determine minOut
+	quoteOut, err := chain.AerodromeQuote(ctx, s.client, config.AeroQuoter,
+		baseAddr, tokenAddr, amountIn, isStable)
+	if err != nil || quoteOut == nil || quoteOut.Sign() == 0 {
+		log.Warn("scalper: quote failed, skipping entry",
+			"token", ev.TokenSym, "err", err)
+		return
+	}
+
+	// Apply slippage tolerance (0.5% default from config)
+	minOut := new(big.Int).Mul(quoteOut, big.NewInt(9950))
+	minOut.Div(minOut, big.NewInt(10000)) // 99.5% of quote = 0.5% slippage
+
+	deadline := new(big.Int).Set(uint64(time.Now().Add(60 * time.Second).Unix()))
+
+	// Approve then swap
+	approveHash, err := chain.AerodromeApprove(ctx, s.client, s.privKey, baseAddr, amountIn)
+	if err != nil {
+		log.Error("scalper: approve failed", "token", ev.TokenSym, "err", err)
+		return
+	}
+	log.Debug("scalper: approve pending", "hash", approveHash.Hex())
+
+	// Small delay for approve to confirm
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(2 * time.Second):
+	}
+
+	swapHash, err := chain.AerodromeSwap(ctx, s.client, s.privKey,
+		baseAddr, tokenAddr, amountIn, minOut, isStable, deadline)
+	if err != nil {
+		log.Error("scalper: swap failed", "token", ev.TokenSym, "err", err)
+		state.Global.Alert("error", "scalper",
+			fmt.Sprintf("Buy failed: %s", ev.TokenSym), err.Error())
+		return
+	}
+
+	log.Info("🎯 SCALP EXECUTED",
+		"token",    ev.TokenSym,
+		"amount",   fmt.Sprintf("$%.0f USDC", positionUSD),
+		"tx",       swapHash.Hex(),
+		"buy_dex",  "Aerodrome",
+		"risk",     hpResult.RiskLevel,
+	)
+
+	// Track position
+	s.mu.Lock()
+	s.openPos[tokenAddr] = &Position{
+		TokenAddr: tokenAddr,
+		TokenSym:  ev.TokenSym,
+		BaseToken: baseSym,
+		EntryUSD:  positionUSD,
+		BoughtAt:  time.Now(),
+		BuyDEX:    "Aerodrome",
+		TxHash:    swapHash,
+	}
+	s.mu.Unlock()
+
+	// Record profit event for treasury tracking
+	state.Global.RecordProfit(state.ProfitEvent{
+		BotName:    "scalper",
+		PairKey:    baseSym + "/" + ev.TokenSym,
+		ProfitUSD:  0, // Will be realized on sell
+		ExecutedAt: time.Now(),
+		TxHash:     swapHash,
+	})
 }
 
 func (s *Scalper) checkTimeouts(ctx context.Context) {

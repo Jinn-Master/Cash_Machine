@@ -43,6 +43,7 @@ import (
 	"github.com/Jinn-Master/Cash_Machine/bots/solver"
 	"github.com/Jinn-Master/Cash_Machine/bots/staking"
 	"github.com/Jinn-Master/Cash_Machine/core/config"
+	"github.com/Jinn-Master/Cash_Machine/core/health"
 	"github.com/Jinn-Master/Cash_Machine/core/logger"
 	"github.com/Jinn-Master/Cash_Machine/core/state"
 	"github.com/Jinn-Master/Cash_Machine/core/treasury"
@@ -159,7 +160,7 @@ func main() {
 	}()
 
 	// ── Token price updater ───────────────────────────────────────────────────
-	// Simple: track WETH/USDC price for gas cost calculations
+	// Fetches real WETH/USD price from Uniswap V3 slot0 every 30 seconds.
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -168,15 +169,18 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				// TODO: fetch WETH/USD price from UniV3 USDC/WETH pool
-				// For now: hardcode approximate (oversight bot will update this)
+				price, err := chain.FetchWETHPrice(ctx, client)
+				if err != nil {
+					log.Warn("WETH price fetch failed", "err", err)
+					continue
+				}
 				state.Global.SetPrice(
 					common.HexToAddress(config.AddrWETH),
 					state.PriceUpdate{
 						TokenAddr: common.HexToAddress(config.AddrWETH),
 						TokenSym:  "WETH",
-						PriceUSD:  3000.0, // placeholder
-						Source:    "init",
+						PriceUSD:  price,
+						Source:    "uniV3-slot0",
 						UpdatedAt: time.Now(),
 					},
 				)
@@ -204,7 +208,7 @@ func main() {
 	log.Info("🚀 starting all bots...")
 
 	// ── Bot 3: Dust collector ─────────────────────────────────────────────────
-	dustBot := dust.New(client, botWallet)
+	dustBot := dust.New(client, botWallet, privKey)
 	go dustBot.Run(ctx)
 	log.Info("✅ Bot 3: Dust Collector — started")
 
@@ -244,15 +248,23 @@ func main() {
 	log.Info("✅ Bot 7: Staking — started")
 
 	// ── Treasury ──────────────────────────────────────────────────────────────
+	spendingWallet := common.HexToAddress(os.Getenv("SPENDING_WALLET"))
+	overheadWallet := common.HexToAddress(os.Getenv("OVERHEAD_WALLET"))
+	stakingWallet  := common.HexToAddress(os.Getenv("STAKING_WALLET"))
 	treas := treasury.New(
 		client, privKey, botWallet,
-		common.HexToAddress(os.Getenv("SPENDING_WALLET")),
-		common.HexToAddress(os.Getenv("OVERHEAD_WALLET")),
+		spendingWallet,
+		overheadWallet,
 		stakingWallet,
 		chainID,
 	)
 	go treas.Run(ctx)
 	log.Info("✅ Treasury — started")
+
+	// ── Health check endpoint ────────────────────────────────────────────────
+	healthServer := health.New(client, botWallet.Hex(), 8080)
+	healthServer.Start(ctx)
+	log.Info("✅ HealthCheck — :8080/health :8080/ready")
 
 	// ── Oversight monitor (last) ──────────────────────────────────────────────
 	mon := monitor.New(monitor.Config{

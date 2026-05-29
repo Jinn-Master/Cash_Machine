@@ -129,21 +129,33 @@ forge create ArbitrageExecutor \
   --rpc-url https://mainnet.base.org \
   --private-key $PRIVATE_KEY \
   --constructor-args \
-    0xA238Dd80C259a72e81d7e4664a9801593F98d1c5 \  # Aave pool
-    0x2626664c2603336E57B271c5C0b26F421741e481 \  # UniV3 router
-    0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43 \  # Aero router
-    0x420DD381b31aEf6683db6B902084cB0FFECe40Da \  # Aero volatile factory
-    0x420DD381b31aEf6683db6B902084cB0FFECe40Da \  # Aero stable factory
-    0x327Df1E6de05895d2ab08513aaDD9313Fe505d86 \  # BaseSwap router
-    0xaaa3b1F1bd7BCc97fD1917c18ADE665C5D31F066 \  # SwapBased router
-    5000000                                        # min profit (0.005 USDC)
+    0xBA12222222228d8Ba445958a75a0704d566BF2C8 \
+  # ^ Balancer Vault (flash loan provider — free on Base) \
+    0x2626664c2603336E57B271c5C0b26F421741e481 \
+  # ^ UniV3 Router \
+    0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43 \
+  # ^ Aerodrome Router \
+    0x420DD381b31aEf6683db6B902084cB0FFECe40Da \
+  # ^ Aerodrome Volatile Factory \
+    0x420DD381b31aEf6683db6B902084cB0FFECe40Da \
+  # ^ Aerodrome Stable Factory \
+    0x327Df1E6de05895d2ab08513aaDD9313Fe505d86 \
+  # ^ BaseSwap Router \
+    0xaaa3b1F1bd7BCc97fD1917c18ADE665C5D31F066 \
+  # ^ SwapBased Router \
+    0x5eDEd0d7E76C563FF081Ca01D9d12D6B404e2E9f \
+  # ^ Maverick V2 Router \
+    5000000
+  # ^ min profit (0.005 USDC)
 
 # Save the deployed contract address — you'll need it in .env
 # Example output: Deployed to: 0xYOUR_CONTRACT_ADDRESS
 ```
 
+**IMPORTANT:** The first constructor arg must be the Balancer Vault address (`0xBA12...f2C8`), NOT the Aave pool. The contract uses Balancer flash loans (free on Base), not Aave flash loans. Using the wrong address will cause all flash loan calls to revert.
+
 Alternatively, deploy via Remix IDE (remix.ethereum.org):
-1. Open ArbitrageExecutor.sol, compile with Solidity 0.8.19
+1. Open ArbitrageExecutor.sol, compile with Solidity 0.8.20
 2. Connect MetaMask to Base mainnet
 3. Deploy with constructor args above
 4. Save the address
