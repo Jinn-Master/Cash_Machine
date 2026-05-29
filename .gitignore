@@ -1,30 +1,16 @@
-# Environment — NEVER commit
-.env
-
-# Go build artifacts
-money-printer
-arb-bot
-*.test
-*.out
-
-# Hardhat / Node
-node_modules/
-artifacts/
+# Build artifacts
+out/
 cache/
-typechain-types/
+artifacts/
 
-# Logs
-logs/
+# IDE
+.idea/
+.vscode/
+
+# Environment
+.env
 *.log
 
 # OS
 .DS_Store
 Thumbs.db
-
-# IDE
-.vscode/
-.idea/
-
-# Go workspace
-go.work
-go.work.sum

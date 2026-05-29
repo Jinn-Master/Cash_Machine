@@ -167,7 +167,7 @@ contract ArbitrageExecutor is IFlashLoanRecipient {
     ) external override {
         require(msg.sender == address(balancer), "not balancer");
         require(feeAmounts.length == 1, "bad fee len");
-        require(feeAmounts[0] == 0, "flash loan has fees — wrong chain or vault");
+        require(feeAmounts[0] == 0, "flash loan has fees - wrong chain or vault");
 
         address tokenA = _cbTokenA; address tokenB = _cbTokenB;
         uint24 poolFee = _cbPoolFee; uint8 buyDex = _cbBuyDex; uint8 sellDex = _cbSellDex;
