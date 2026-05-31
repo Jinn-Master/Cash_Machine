@@ -37,6 +37,7 @@ import (
 	"github.com/Jinn-Master/Cash_Machine/core/logger"
 	"github.com/Jinn-Master/Cash_Machine/core/state"
 	"github.com/Jinn-Master/Cash_Machine/core/treasury"
+	"github.com/Jinn-Master/Cash_Machine/oversight/ai"
 )
 
 // ── Monitor config ────────────────────────────────────────────────────────────
@@ -60,13 +61,21 @@ type Monitor struct {
 	mu       sync.Mutex
 	errCount map[string]int // bot → error count (for rate limiting alerts)
 	lastFix  time.Time      // last time a fix was proposed
+	aiClient *ai.Client     // local or cloud AI for fix proposals
 }
 
 func New(cfg Config, t *treasury.Treasury) *Monitor {
+	aiCfg := ai.Config{
+		Backend:      os.Getenv("AI_BACKEND"),
+		ClaudeAPIKey: cfg.ClaudeAPIKey,
+		LocalURL:     os.Getenv("LOCAL_AI_URL"),
+		LocalModel:   os.Getenv("LOCAL_AI_MODEL"),
+	}
 	return &Monitor{
 		cfg:      cfg,
 		treasury: t,
 		errCount: make(map[string]int),
+		aiClient: ai.NewClient(aiCfg),
 	}
 }
 
@@ -210,131 +219,77 @@ func (m *Monitor) checkLogLine(logFile, line string) {
 
 // ── AI fix proposals ──────────────────────────────────────────────────────────
 
-type claudeMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type claudeRequest struct {
-	Model     string          `json:"model"`
-	MaxTokens int             `json:"max_tokens"`
-	Messages  []claudeMessage `json:"messages"`
-	System    string          `json:"system"`
-}
-
-type claudeResponse struct {
-	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content"`
-}
-
 func (m *Monitor) proposeAIFix(ctx context.Context, alert state.AlertEvent) {
 	log := logger.Log
 
 	// Read relevant log context
 	logContext := m.readRecentLogs(alert.BotName, 100)
 
-	prompt := fmt.Sprintf(`You are reviewing an error in the "Money Printer" crypto arbitrage bot running on Base blockchain.
-
-Error details:
-- Bot: %s
-- Level: %s
-- Message: %s
-- Detail: %s
-- Time: %s
-
-Recent log context:
-%s
-
-Please:
-1. Diagnose the most likely cause
-2. Propose a specific code fix (with file path and exact change)
-3. Rate confidence in your diagnosis (1-10)
-4. Note any risks in applying the fix
-
-Format your response as JSON:
-{
-  "diagnosis": "...",
-  "confidence": 7,
-  "fix_file": "path/to/file.go",
-  "fix_description": "...",
-  "fix_diff": "--- before\n+++ after\n...",
-  "risks": "...",
-  "requires_restart": true
-}`,
-		alert.BotName, alert.Level, alert.Message, alert.Detail,
+	// Use AI client (local or cloud) for fix proposal
+	proposal, err := m.aiClient.ProposeFix(
+		ctx,
+		alert.Message,
+		alert.BotName,
+		alert.Level,
+		alert.Detail,
 		alert.OccurredAt.Format(time.RFC3339),
 		logContext,
 	)
-
-	reqBody := claudeRequest{
-		Model:     "claude-opus-4-6",
-		MaxTokens: 2000,
-		System:    "You are an expert Go developer specialising in blockchain/DeFi systems. Provide concise, accurate diagnoses.",
-		Messages:  []claudeMessage{{Role: "user", Content: prompt}},
-	}
-
-	body, _ := json.Marshal(reqBody)
-	req, _ := http.NewRequestWithContext(ctx, "POST",
-		"https://api.anthropic.com/v1/messages", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", m.cfg.ClaudeAPIKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
 	if err != nil {
 		log.Error("AI fix proposal failed", "err", err)
 		return
 	}
-	defer resp.Body.Close()
-
-	var claudeResp claudeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&claudeResp); err != nil {
-		log.Error("AI response decode failed", "err", err)
-		return
-	}
-
-	if len(claudeResp.Content) == 0 {
-		return
-	}
-
-	fixProposal := claudeResp.Content[0].Text
 
 	m.mu.Lock()
 	m.lastFix = time.Now()
 	m.mu.Unlock()
 
-	log.Info("🤖 AI fix proposal generated", "bot", alert.BotName)
+	log.Info("🤖 AI fix proposal generated", "bot", alert.BotName, "confidence", proposal.Confidence)
 
 	// Send via email for approval
 	subject := fmt.Sprintf("[Money Printer] AI Fix Proposal — %s (%s)", alert.BotName, alert.Level)
-	body2 := fmt.Sprintf(`Money Printer AI Fix Proposal
+	body := fmt.Sprintf(`Money Printer AI Fix Proposal
 ==============================
 
 Error: %s
 Bot: %s
 Time: %s
 
-AI Diagnosis & Proposed Fix:
+Diagnosis (confidence: %d/10):
+%s
+
+Proposed Fix:
+- File: %s
+- Description: %s
+- Risks: %s
+- Requires restart: %v
+
+Diff:
 %s
 
 ---
-To approve this fix, reply to this email with "APPROVE"
-To reject, reply with "REJECT"
+To approve, reply "APPROVE" | To reject, reply "REJECT"
 
-IMPORTANT: Review the proposed diff carefully before approving.
-No code changes will be deployed without your explicit approval.
+IMPORTANT: Review the diff carefully before approving.
+No code changes deployed without your explicit approval.
 
-— Money Printer Oversight System`,
+— Money Printer Oversight (AI: %s)`,
 		alert.Message, alert.BotName,
 		alert.OccurredAt.Format("2006-01-02 15:04:05 UTC"),
-		fixProposal,
+		proposal.Confidence,
+		proposal.Diagnosis,
+		proposal.FixFile,
+		proposal.FixDescription,
+		proposal.Risks,
+		proposal.RequiresRestart,
+		proposal.FixDiff,
+		m.aiClient.Backend(),
 	)
 
-	m.sendEmail(subject, body2)
-	m.sendTelegram(fmt.Sprintf("🤖 *AI Fix Proposed*\n\nBot: `%s`\nCheck your email for details and approval request.", alert.BotName))
+	m.sendEmail(subject, body)
+	m.sendTelegram(fmt.Sprintf("🤖 *AI Fix Proposed*%s\n\nBot: `%s`\nConfidence: %d/10\nDiagnosis: %s\n\nCheck email for details.",
+		map[bool]string{true: " (LOCAL AI)", false: ""}[m.aiClient.IsLocal()],
+		alert.BotName, proposal.Confidence, proposal.Diagnosis))
 }
 
 // ── Scheduled reports ─────────────────────────────────────────────────────────
