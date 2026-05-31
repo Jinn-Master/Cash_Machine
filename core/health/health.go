@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/Jinn-Master/Cash_Machine/core/state"
 )
 
 const (
@@ -73,6 +74,9 @@ func (s *Server) Start(ctx context.Context) {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/ready", s.handleReady)
 	mux.HandleFunc("/metrics", s.handleMetrics)
+	mux.HandleFunc("/kill", s.handleKill)
+	mux.HandleFunc("/resume", s.handleResume)
+	mux.HandleFunc("/status", s.handleStatus)
 
 	s.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.port),
@@ -150,4 +154,49 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		rpcAlive = 1
 	}
 	fmt.Fprintf(w, "rpc_connected %d\n", rpcAlive)
+}
+
+// handleKill — POST /kill — Pauses all trading immediately.
+// Usage: curl -X POST http://localhost:8080/kill
+func (s *Server) handleKill(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	state.Global.EnableKillSwitch("HTTP /kill endpoint triggered")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "paused",
+		"message": "Kill switch activated. All trading paused.",
+	})
+}
+
+// handleResume — POST /resume — Resumes trading after a kill.
+// Also removes the kill switch file if present.
+// Usage: curl -X POST http://localhost:8080/resume
+func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	state.Global.Resume()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "resumed",
+		"message": "Kill switch deactivated. Trading resumed.",
+	})
+}
+
+// handleStatus — GET /status — Shows kill switch state and basic system info.
+// Usage: curl http://localhost:8080/status
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"killed":       state.Global.IsKilled(),
+		"kill_file":    state.KillSwitchFile,
+		"total_profit": state.Global.TotalProfit(),
+		"working_cap":  state.Global.WorkingCapital(),
+		"gas_price":    state.Global.GasPrice(),
+		"hot_tokens":   state.Global.HotTokenCount(),
+	})
 }

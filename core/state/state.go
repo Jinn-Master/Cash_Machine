@@ -13,11 +13,26 @@ package state
 
 import (
 	"math/big"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 )
+
+// ── Kill Switch ────────────────────────────────────────────────────────────────
+// The kill switch provides three ways to pause all trading instantly:
+//
+//   1. File-based:  Create /tmp/cashmachine.kill  → bot pauses within seconds
+//   2. HTTP API:    POST /kill (port 8080)         → pause
+//                   POST /resume (port 8080)        → resume
+//   3. Env var:     KILL_SWITCH=true in .env       → stays paused on startup
+//
+// While paused: all bots keep running (watching, detecting) but NO trades execute.
+// The dashboard shows "PAUSED" status. Treasury continues monitoring.
+// To resume: remove the file, POST /resume, or unset the env var and restart.
+
+const KillSwitchFile = "/tmp/cashmachine.kill"
 
 // ── Event types ───────────────────────────────────────────────────────────────
 
@@ -118,6 +133,9 @@ type SharedState struct {
 
 	// Last gas price (gwei) — updated by gas monitor
 	gasPriceGwei float64
+
+	// Kill switch state
+	killSwitch bool // true = all trading paused
 
 	// ── Event channels (buffered, non-blocking) ───────────────────────────────
 	NewPairCh       chan NewTokenEvent
@@ -297,5 +315,54 @@ func (s *SharedState) Alert(level, bot, msg, detail string) {
 	select {
 	case s.AlertCh <- ev:
 	default:
+	}
+}
+
+// ── Kill Switch ────────────────────────────────────────────────────────────────
+
+// IsKilled returns true if the kill switch is active.
+// Every bot should check this before executing any trade.
+func (s *SharedState) IsKilled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.killSwitch
+}
+
+// CheckKillFile checks if the kill switch file exists on disk.
+// Called periodically by main loop to enable file-based kill.
+func (s *SharedState) CheckKillFile() bool {
+	_, err := os.Stat(KillSwitchFile)
+	return err == nil
+}
+
+// EnableKillSwitch pauses all trading immediately.
+func (s *SharedState) EnableKillSwitch(reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.killSwitch = true
+	Global.Alert("critical", "KILL-SWITCH", "Trading PAUSED", reason)
+}
+
+// Resume re-enables trading after a kill.
+func (s *SharedState) Resume() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.killSwitch = false
+	os.Remove(KillSwitchFile)
+	Global.Alert("info", "KILL-SWITCH", "Trading RESUMED", "Kill switch deactivated")
+}
+
+// PollKillFile should be called in the main loop every N seconds.
+// Auto-activates kill if file is found, deactivates if removed.
+func (s *SharedState) PollKillFile() {
+	fileExists := s.CheckKillFile()
+	s.mu.RLock()
+	currentlyKilled := s.killSwitch
+	s.mu.RUnlock()
+
+	if fileExists && !currentlyKilled {
+		s.EnableKillSwitch("Kill file detected: " + KillSwitchFile)
+	} else if !fileExists && currentlyKilled {
+		s.Resume()
 	}
 }

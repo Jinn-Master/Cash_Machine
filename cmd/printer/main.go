@@ -65,6 +65,13 @@ func main() {
 		log.Warn(".env not found, using environment variables")
 	}
 
+	// ── Kill switch env var check ─────────────────────────────────────────────
+	if os.Getenv("KILL_SWITCH") == "true" {
+		state.Global.EnableKillSwitch("KILL_SWITCH env var set at startup")
+		log.Warn("💀 Kill switch ENABLED via env var — trading paused on startup")
+		log.Warn("💀 Set KILL_SWITCH=false and restart to enable trading, or use POST /resume")
+	}
+
 	required := map[string]string{
 		"BASE_WS_URL":                  os.Getenv("BASE_WS_URL"),
 		"ARBITRAGE_CONTRACT_ADDRESS":   os.Getenv("ARBITRAGE_CONTRACT_ADDRESS"),
@@ -202,6 +209,20 @@ func main() {
 				if pruned > 0 {
 					log.Debug("pruned stale hot tokens", "count", pruned)
 				}
+			}
+		}
+	}()
+
+	// ── Kill switch poller (checks every 5 seconds) ─────────────────────────
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				state.Global.PollKillFile()
 			}
 		}
 	}()
